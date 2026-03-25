@@ -1,0 +1,70 @@
+-- Roblox Luau: Ant Life Invisibility Button Script
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- 1. Create the GUI Button on screen
+local ScreenGui = Instance.new("ScreenGui")
+local ToggleButton = Instance.new("TextButton")
+
+ScreenGui.Name = "InvisGui"
+ScreenGui.Parent = PlayerGui
+ScreenGui.ResetOnSpawn = false
+
+ToggleButton.Name = "ToggleInvis"
+ToggleButton.Parent = ScreenGui
+ToggleButton.Size = UDim2.new(0, 150, 0, 50)
+ToggleButton.Position = UDim2.new(0.05, 0, 0.4, 0) -- Positioned on the left side
+ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+ToggleButton.Text = "Invisibility: OFF"
+ToggleButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleButton.Font = Enum.Font.SourceSansBold
+ToggleButton.TextSize = 18
+
+local isInvisible = false
+
+-- 2. Define the transparency logic
+local function setTransparency(char, transparencyValue)
+    for _, item in pairs(char:GetDescendants()) do
+        -- Hide MeshParts (Body) and Decals (Faces/Markings)
+        if item:IsA("BasePart") or item:IsA("MeshPart") then
+            if item.Name ~= "HumanoidRootPart" then
+                item.Transparency = transparencyValue
+            end
+            -- Remove shadows so you aren't spotted on the ground
+            item.CastShadow = (transparencyValue == 0)
+            
+        elseif item:IsA("Decal") then
+            item.Transparency = transparencyValue
+            
+        -- Hide nametags and colony status icons
+        elseif item:IsA("BillboardGui") then
+            item.Enabled = (transparencyValue == 0)
+        end
+    end
+end
+
+-- 3. Connect Button Click
+ToggleButton.MouseButton1Click:Connect(function()
+    local Character = Player.Character
+    if not Character then return end
+    
+    isInvisible = not isInvisible
+    if isInvisible then
+        setTransparency(Character, 1)
+        ToggleButton.Text = "Invisibility: ON"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+    else
+        setTransparency(Character, 0)
+        ToggleButton.Text = "Invisibility: OFF"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+    end
+end)
+
+-- Re-apply state if you hatch into a new ant caste
+Player.CharacterAdded:Connect(function(newChar)
+    task.wait(1) -- Wait for character to fully load
+    if isInvisible then
+        setTransparency(newChar, 1)
+    end
+end)
