@@ -1,82 +1,90 @@
--- FE Invisibility Button Script for Ant Life
+-- Ant Life: Ultimate FE Invisibility (Non-Teleporting)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local Player = Players.LocalPlayer
-local Mouse = Player:GetMouse()
+local UserInputService = game:GetService("UserInputService")
 
--- 1. Create the GUI Toggle
+local Player = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- 1. Create the UI Button
 local ScreenGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
-ScreenGui.Name = "FE_Invis_Gui"
+ScreenGui.Name = "AntStealth"
+ScreenGui.ResetOnSpawn = false
+
 local Button = Instance.new("TextButton", ScreenGui)
 Button.Size = UDim2.new(0, 150, 0, 50)
 Button.Position = UDim2.new(0.05, 0, 0.4, 0)
-Button.Text = "FE Invisible: OFF"
-Button.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+Button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+Button.Text = "STEALTH: OFF"
 Button.TextColor3 = Color3.new(1, 1, 1)
+Button.Font = Enum.Font.SourceSansBold
+Button.TextSize = 20
 
 local isInvisible = false
-local GhostAnt = nil
-local RealCharacter = nil
+local GhostModel = nil
+local Connection = nil
 
--- 2. Mimic Logic (The FE Bypass)
-local function toggleFEInvisibility()
-    RealCharacter = Player.Character
-    if not RealCharacter or not RealCharacter:FindFirstChild("HumanoidRootPart") then return end
-
+-- 2. Logic to hide the character FE
+local function toggleStealth()
+    local RealChar = Player.Character
+    if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") then return end
+    
     isInvisible = not isInvisible
     
     if isInvisible then
-        -- Step A: Create the "Ghost" ant for you to see and move
-        RealCharacter.Archivable = true
-        GhostAnt = RealCharacter:Clone()
-        GhostAnt.Parent = workspace
-        GhostAnt.Name = "GhostAnt_Local"
+        -- Create a "Ghost" version only you can see to move around
+        RealChar.Archivable = true
+        GhostModel = RealChar:Clone()
+        GhostModel.Parent = workspace
+        GhostModel.Name = "StealthGhost"
         
-        -- Step B: Make the real ant "disappear" for others
-        -- Parenting to nil is the standard FE bypass
-        RealCharacter.Parent = nil 
+        -- Make the Ghost translucent for you so you know you're in stealth
+        for _, p in pairs(GhostModel:GetDescendants()) do
+            if p:IsA("BasePart") then p.Transparency = 0.5 p.CanCollide = false end
+        end
         
-        Button.Text = "FE Invisible: ON"
-        Button.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        -- Hide the Real Ant from everyone else (FE Bypass)
+        -- We parent it to a local folder; the server stops replicating it to others
+        local HiddenFolder = Instance.new("Folder")
+        HiddenFolder.Name = "HiddenAnt"
+        RealChar.Parent = HiddenFolder
         
-        -- Step C: Movement Loop (Ghost mimics your inputs)
-        task.spawn(function()
-            while isInvisible and GhostAnt do
-                local root = GhostAnt:FindFirstChild("HumanoidRootPart")
-                if root then
-                    -- Keep your camera focused on the Ghost ant
-                    workspace.CurrentCamera.CameraSubject = GhostAnt.Humanoid
-                end
-                task.wait()
+        -- Fix Movement: Point camera and controls to the Ghost
+        Camera.CameraSubject = GhostModel:FindFirstChildWhichIsA("Humanoid")
+        
+        -- Sync Loop: Keeps your 'Real' hitbox at your Ghost's position
+        -- This prevents the "teleport-kill" because coordinates update smoothly
+        Connection = RunService.Heartbeat:Connect(function()
+            if RealChar and GhostModel and RealChar:FindFirstChild("HumanoidRootPart") then
+                RealChar.HumanoidRootPart.CFrame = GhostModel.HumanoidRootPart.CFrame
             end
         end)
+        
+        Button.Text = "STEALTH: ON"
+        Button.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
     else
-        -- Step D: Re-emerge
-        if GhostAnt then
-            local lastPos = GhostAnt.HumanoidRootPart.CFrame
-            GhostAnt:Destroy()
+        -- Clean up and return to normal
+        if Connection then Connection:Disconnect() end
+        if GhostModel then
+            local lastPos = GhostModel.HumanoidRootPart.CFrame
+            GhostModel:Destroy()
             
-            -- Bring the real character back to the ghost's last location
-            RealCharacter.Parent = workspace
-            RealCharacter.HumanoidRootPart.CFrame = lastPos
-            workspace.CurrentCamera.CameraSubject = RealCharacter.Humanoid
+            -- Bring the real character back to where the ghost stopped
+            RealChar.Parent = workspace
+            RealChar:PivotTo(lastPos)
+            Camera.CameraSubject = RealChar:FindFirstChildWhichIsA("Humanoid")
         end
         
-        Button.Text = "FE Invisible: OFF"
-        Button.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+        Button.Text = "STEALTH: OFF"
+        Button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     end
 end
 
-Button.MouseButton1Click:Connect(toggleFEInvisibility)
+Button.MouseButton1Click:Connect(toggleStealth)
 
--- 3. Component Clean-up
--- Ensures that accessories and nametags don't "float"
-local function hideResiduals(char)
-    for _, item in pairs(char:GetDescendants()) do
-        if item:IsA("BasePart") or item:IsA("Decal") then
-            if item.Name ~= "HumanoidRootPart" then item.Transparency = 1 end --
-        elseif item:IsA("BillboardGui") then
-            item.Enabled = false
-        end
+-- Handle evolution/caste changes in Ant Life
+Player.CharacterAdded:Connect(function()
+    if isInvisible then
+        toggleStealth() -- Force reset if you evolve/die
     end
-end
+end)
