@@ -1,90 +1,99 @@
--- Ant Life: Ultimate FE Invisibility (Non-Teleporting)
+-- ANT LIFE: PERSISTENT FE STEALTH (Movement & Visibility Fix)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-
 local Player = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- 1. Create the UI Button
+-- 1. Create the Toggle Button
 local ScreenGui = Instance.new("ScreenGui", Player:WaitForChild("PlayerGui"))
-ScreenGui.Name = "AntStealth"
+ScreenGui.Name = "AntStealthUI"
 ScreenGui.ResetOnSpawn = false
 
 local Button = Instance.new("TextButton", ScreenGui)
-Button.Size = UDim2.new(0, 150, 0, 50)
-Button.Position = UDim2.new(0.05, 0, 0.4, 0)
-Button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+Button.Size = UDim2.new(0, 160, 0, 50)
+Button.Position = UDim2.new(0.05, 0, 0.4, 0) -- Left side of screen
+Button.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 Button.Text = "STEALTH: OFF"
 Button.TextColor3 = Color3.new(1, 1, 1)
 Button.Font = Enum.Font.SourceSansBold
 Button.TextSize = 20
 
-local isInvisible = false
-local GhostModel = nil
-local Connection = nil
+local isActive = false
+local ghostModel = nil
+local syncLoop = nil
+local realBody = nil
 
--- 2. Logic to hide the character FE
+-- 2. Stealth Logic
 local function toggleStealth()
-    local RealChar = Player.Character
-    if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") then return end
+    realBody = Player.Character
+    if not realBody or not realBody:FindFirstChild("HumanoidRootPart") then return end
+
+    isActive = not isActive
     
-    isInvisible = not isInvisible
-    
-    if isInvisible then
-        -- Create a "Ghost" version only you can see to move around
-        RealChar.Archivable = true
-        GhostModel = RealChar:Clone()
-        GhostModel.Parent = workspace
-        GhostModel.Name = "StealthGhost"
+    if isActive then
+        -- Step A: Create the "Ghost" for you to control
+        realBody.Archivable = true
+        ghostModel = realBody:Clone()
+        ghostModel.Name = "Ant_Ghost_Local"
+        ghostModel.Parent = workspace
         
-        -- Make the Ghost translucent for you so you know you're in stealth
-        for _, p in pairs(GhostModel:GetDescendants()) do
-            if p:IsA("BasePart") then p.Transparency = 0.5 p.CanCollide = false end
+        -- Make ghost see-through for you (Visual feedback)
+        for _, part in pairs(ghostModel:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.Transparency = 0.5
+                part.CanCollide = false -- Prevent physics glitches
+            end
         end
         
-        -- Hide the Real Ant from everyone else (FE Bypass)
-        -- We parent it to a local folder; the server stops replicating it to others
-        local HiddenFolder = Instance.new("Folder")
-        HiddenFolder.Name = "HiddenAnt"
-        RealChar.Parent = HiddenFolder
+        -- Step B: HIDE real body from others (FE Bypass)
+        -- Moving to a folder created locally de-replicates you from other clients
+        local hiddenNode = Instance.new("Folder")
+        hiddenNode.Name = "ReplicationStopper"
+        realBody.Parent = hiddenNode
         
-        -- Fix Movement: Point camera and controls to the Ghost
-        Camera.CameraSubject = GhostModel:FindFirstChildWhichIsA("Humanoid")
+        -- Step C: FIX MOVEMENT (Transfer controls to Ghost)
+        -- This prevents being "frozen" or unable to move
+        Player.Character = ghostModel
+        Camera.CameraSubject = ghostModel:FindFirstChildWhichIsA("Humanoid")
         
-        -- Sync Loop: Keeps your 'Real' hitbox at your Ghost's position
-        -- This prevents the "teleport-kill" because coordinates update smoothly
-        Connection = RunService.Heartbeat:Connect(function()
-            if RealChar and GhostModel and RealChar:FindFirstChild("HumanoidRootPart") then
-                RealChar.HumanoidRootPart.CFrame = GhostModel.HumanoidRootPart.CFrame
+        -- Step D: COORDINATE SYNC (Prevents "Teleport-Kill")
+        -- Constantly moves your real hitbox to your ghost so you aren't killed for Tping
+        syncLoop = RunService.RenderStepped:Connect(function()
+            if ghostModel and realBody and realBody:FindFirstChild("HumanoidRootPart") then
+                realBody.HumanoidRootPart.CFrame = ghostModel.HumanoidRootPart.CFrame
             end
         end)
         
         Button.Text = "STEALTH: ON"
-        Button.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
+        Button.BackgroundColor3 = Color3.fromRGB(0, 160, 0)
     else
-        -- Clean up and return to normal
-        if Connection then Connection:Disconnect() end
-        if GhostModel then
-            local lastPos = GhostModel.HumanoidRootPart.CFrame
-            GhostModel:Destroy()
+        -- Step E: Re-emerge
+        if syncLoop then syncLoop:Disconnect() end
+        if ghostModel then
+            local lastCFrame = ghostModel.HumanoidRootPart.CFrame
+            ghostModel:Destroy()
             
-            -- Bring the real character back to where the ghost stopped
-            RealChar.Parent = workspace
-            RealChar:PivotTo(lastPos)
-            Camera.CameraSubject = RealChar:FindFirstChildWhichIsA("Humanoid")
+            -- Bring real body back to current location
+            realBody.Parent = workspace
+            realBody:PivotTo(lastCFrame)
+            Player.Character = realBody
+            Camera.CameraSubject = realBody:FindFirstChildWhichIsA("Humanoid")
         end
         
         Button.Text = "STEALTH: OFF"
-        Button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+        Button.BackgroundColor3 = Color3.fromRGB(160, 0, 0)
     end
 end
 
 Button.MouseButton1Click:Connect(toggleStealth)
 
--- Handle evolution/caste changes in Ant Life
+-- Handle evolution (Ant Life replaces your character when you grow/hatch)
 Player.CharacterAdded:Connect(function()
-    if isInvisible then
-        toggleStealth() -- Force reset if you evolve/die
+    if isActive then
+        isActive = false
+        if syncLoop then syncLoop:Disconnect() end
+        if ghostModel then ghostModel:Destroy() end
+        Button.Text = "STEALTH: OFF"
+        Button.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
     end
 end)
