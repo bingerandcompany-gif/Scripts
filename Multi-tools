@@ -1,0 +1,811 @@
+--// Multi-Tool Selector System for Roblox
+--// Place this in StarterPlayer > StarterPlayerScripts as a LocalScript
+--// Features: Multi-select tools, GUI management, keybind activation, rapid-fire all selected
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local backpack = player:WaitForChild("Backpack")
+
+-- Wait for character
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+-- =============================================================================
+-- CONFIGURATION
+-- =============================================================================
+local CONFIG = {
+    ToggleKey = Enum.KeyCode.RightShift,
+    ActivateKey = Enum.KeyCode.Q,
+    ActivationDelay = 0.05,
+    GUIVisible = true,
+    Theme = {
+        Background = Color3.fromRGB(22, 22, 30),
+        TitleBar = Color3.fromRGB(30, 30, 42),
+        Button = Color3.fromRGB(45, 45, 62),
+        ButtonHover = Color3.fromRGB(55, 55, 75),
+        Accent = Color3.fromRGB(88, 101, 242),
+        AccentHover = Color3.fromRGB(108, 121, 255),
+        Success = Color3.fromRGB(46, 204, 113),
+        Danger = Color3.fromRGB(231, 76, 60),
+        Warning = Color3.fromRGB(241, 196, 15),
+        TextPrimary = Color3.fromRGB(236, 238, 242),
+        TextSecondary = Color3.fromRGB(142, 146, 151),
+        Selected = Color3.fromRGB(88, 101, 242),
+        SelectedHover = Color3.fromRGB(108, 121, 255),
+        CheckboxBg = Color3.fromRGB(60, 60, 80),
+        CheckboxCheck = Color3.fromRGB(88, 101, 242),
+    }
+}
+
+-- =============================================================================
+-- STATE MANAGEMENT
+-- =============================================================================
+local selectedTools = {}
+local toolButtons = {}
+local isGUIVisible = CONFIG.GUIVisible
+local isProcessing = false
+
+-- =============================================================================
+-- UTILITY FUNCTIONS
+-- =============================================================================
+
+local function createCorner(parent, radius)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, radius or 6)
+    corner.Parent = parent
+    return corner
+end
+
+local function createStroke(parent, color, thickness)
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = color or CONFIG.Theme.Accent
+    stroke.Thickness = thickness or 1
+    stroke.Parent = parent
+    return stroke
+end
+
+local function tween(object, properties, duration)
+    local tween = TweenService:Create(object, TweenInfo.new(duration or 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), properties)
+    tween:Play()
+    return tween
+end
+
+local function playButtonFeedback(button)
+    tween(button, {Size = UDim2.new(button.Size.X.Scale, button.Size.X.Offset * 0.95, button.Size.Y.Scale, button.Size.Y.Offset * 0.95)}, 0.05)
+    task.delay(0.05, function()
+        tween(button, {Size = UDim2.new(button.Size.X.Scale, button.Size.X.Offset / 0.95, button.Size.Y.Scale, button.Size.Y.Offset / 0.95)}, 0.1)
+    end)
+end
+
+-- =============================================================================
+-- GUI CREATION
+-- =============================================================================
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "MultiToolSelector"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Enabled = isGUIVisible
+screenGui.Parent = playerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 340, 0, 450)
+mainFrame.Position = UDim2.new(0.85, -170, 0.5, -225)
+mainFrame.BackgroundColor3 = CONFIG.Theme.Background
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Selectable = true
+mainFrame.Parent = screenGui
+createCorner(mainFrame, 10)
+createStroke(mainFrame, Color3.fromRGB(50, 50, 70), 1)
+
+-- Shadow effect
+local shadow = Instance.new("ImageLabel")
+shadow.Name = "Shadow"
+shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+shadow.BackgroundTransparency = 1
+shadow.Position = UDim2.new(0.5, 0, 0.5, 0)
+shadow.Size = UDim2.new(1, 40, 1, 40)
+shadow.ZIndex = -1
+shadow.Image = "rbxassetid://5554236805"
+shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+shadow.ImageTransparency = 0.6
+shadow.ScaleType = Enum.ScaleType.Slice
+shadow.SliceCenter = Rect.new(23, 23, 277, 277)
+shadow.Parent = mainFrame
+
+-- Title bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundColor3 = CONFIG.Theme.TitleBar
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+createCorner(titleBar, 10)
+
+local titleFix = Instance.new("Frame")
+titleFix.Name = "Fix"
+titleFix.Size = UDim2.new(1, 0, 0, 10)
+titleFix.Position = UDim2.new(0, 0, 1, -10)
+titleFix.BackgroundColor3 = CONFIG.Theme.TitleBar
+titleFix.BorderSizePixel = 0
+titleFix.Parent = titleBar
+
+-- Title icon
+local titleIcon = Instance.new("TextLabel")
+titleIcon.Name = "Icon"
+titleIcon.Size = UDim2.new(0, 30, 0, 30)
+titleIcon.Position = UDim2.new(0, 10, 0, 5)
+titleIcon.BackgroundTransparency = 1
+titleIcon.Text = "\u{2694}"
+titleIcon.TextColor3 = CONFIG.Theme.Accent
+titleIcon.TextSize = 20
+titleIcon.Font = Enum.Font.GothamBold
+titleIcon.Parent = titleBar
+
+-- Title text
+local titleText = Instance.new("TextLabel")
+titleText.Name = "Title"
+titleText.Size = UDim2.new(1, -100, 1, 0)
+titleText.Position = UDim2.new(0, 42, 0, 0)
+titleText.BackgroundTransparency = 1
+titleText.Text = "Multi-Tool Selector"
+titleText.TextColor3 = CONFIG.Theme.TextPrimary
+titleText.TextSize = 15
+titleText.Font = Enum.Font.GothamBold
+titleText.TextXAlignment = Enum.TextXAlignment.Left
+titleText.Parent = titleBar
+
+-- Selected count indicator
+local countLabel = Instance.new("TextLabel")
+countLabel.Name = "CountLabel"
+countLabel.Size = UDim2.new(0, 80, 0, 22)
+countLabel.Position = UDim2.new(1, -140, 0, 9)
+countLabel.BackgroundColor3 = CONFIG.Theme.Button
+countLabel.BorderSizePixel = 0
+countLabel.Text = "0 selected"
+countLabel.TextColor3 = CONFIG.Theme.TextSecondary
+countLabel.TextSize = 11
+countLabel.Font = Enum.Font.GothamSemibold
+countLabel.Parent = titleBar
+createCorner(countLabel, 11)
+
+-- Toggle button
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleBtn"
+toggleBtn.Size = UDim2.new(0, 30, 0, 30)
+toggleBtn.Position = UDim2.new(1, -40, 0, 5)
+toggleBtn.BackgroundColor3 = CONFIG.Theme.Button
+toggleBtn.Text = "\u{2212}"
+toggleBtn.TextColor3 = CONFIG.Theme.TextPrimary
+toggleBtn.TextSize = 18
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.Parent = titleBar
+createCorner(toggleBtn, 8)
+
+-- =============================================================================
+-- TOOL LIST AREA
+-- =============================================================================
+
+local listContainer = Instance.new("Frame")
+listContainer.Name = "ListContainer"
+listContainer.Size = UDim2.new(1, -20, 1, -155)
+listContainer.Position = UDim2.new(0, 10, 0, 50)
+listContainer.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+listContainer.BorderSizePixel = 0
+listContainer.Parent = mainFrame
+createCorner(listContainer, 8)
+createStroke(listContainer, Color3.fromRGB(40, 40, 55), 1)
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Name = "ToolList"
+scrollFrame.Size = UDim2.new(1, -8, 1, -8)
+scrollFrame.Position = UDim2.new(0, 4, 0, 4)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.ScrollBarThickness = 4
+scrollFrame.ScrollBarImageColor3 = CONFIG.Theme.Accent
+scrollFrame.ScrollBarImageTransparency = 0.3
+scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollFrame.Parent = listContainer
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 3)
+listLayout.Parent = scrollFrame
+
+local listPadding = Instance.new("UIPadding")
+listPadding.PaddingTop = UDim.new(0, 4)
+listPadding.PaddingBottom = UDim.new(0, 4)
+listPadding.PaddingLeft = UDim.new(0, 4)
+listPadding.PaddingRight = UDim.new(0, 4)
+listPadding.Parent = scrollFrame
+
+-- Empty state label
+local emptyLabel = Instance.new("TextLabel")
+emptyLabel.Name = "EmptyLabel"
+emptyLabel.Size = UDim2.new(1, 0, 1, 0)
+emptyLabel.BackgroundTransparency = 1
+emptyLabel.Text = "No tools in inventory\nCollect some tools!"
+emptyLabel.TextColor3 = CONFIG.Theme.TextSecondary
+emptyLabel.TextSize = 13
+emptyLabel.Font = Enum.Font.Gotham
+emptyLabel.TextXAlignment = Enum.TextXAlignment.Center
+emptyLabel.TextYAlignment = Enum.TextYAlignment.Center
+emptyLabel.Visible = false
+emptyLabel.Parent = scrollFrame
+
+-- =============================================================================
+-- CONTROL BUTTONS
+-- =============================================================================
+
+local controlsFrame = Instance.new("Frame")
+controlsFrame.Name = "Controls"
+controlsFrame.Size = UDim2.new(1, -20, 0, 90)
+controlsFrame.Position = UDim2.new(0, 10, 1, -100)
+controlsFrame.BackgroundTransparency = 1
+controlsFrame.Parent = mainFrame
+
+local topRow = Instance.new("Frame")
+topRow.Name = "TopRow"
+topRow.Size = UDim2.new(1, 0, 0, 34)
+topRow.BackgroundTransparency = 1
+topRow.Parent = controlsFrame
+
+local topLayout = Instance.new("UIListLayout")
+topLayout.FillDirection = Enum.FillDirection.Horizontal
+topLayout.SortOrder = Enum.SortOrder.LayoutOrder
+topLayout.Padding = UDim.new(0, 6)
+topLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+topLayout.Parent = topRow
+
+local function createControlButton(name, text, color, widthScale)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = UDim2.new(widthScale or 0.31, 0, 0, 32)
+    btn.BackgroundColor3 = color or CONFIG.Theme.Button
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = CONFIG.Theme.TextPrimary
+    btn.TextSize = 12
+    btn.Font = Enum.Font.GothamSemibold
+    btn.Parent = topRow
+    createCorner(btn, 6)
+    
+    btn.MouseEnter:Connect(function()
+        tween(btn, {BackgroundColor3 = CONFIG.Theme.ButtonHover}, 0.15)
+    end)
+    btn.MouseLeave:Connect(function()
+        tween(btn, {BackgroundColor3 = color or CONFIG.Theme.Button}, 0.15)
+    end)
+    
+    return btn
+end
+
+local selectAllBtn = createControlButton("SelectAll", "Select All", CONFIG.Theme.Accent, 0.31)
+local deselectAllBtn = createControlButton("DeselectAll", "Clear", CONFIG.Theme.Danger, 0.31)
+local invertBtn = createControlButton("Invert", "Invert", CONFIG.Theme.Warning, 0.31)
+
+-- Activate button
+local activateBtn = Instance.new("TextButton")
+activateBtn.Name = "ActivateBtn"
+activateBtn.Size = UDim2.new(1, 0, 0, 38)
+activateBtn.Position = UDim2.new(0, 0, 0, 42)
+activateBtn.BackgroundColor3 = CONFIG.Theme.Success
+activateBtn.BorderSizePixel = 0
+activateBtn.Text = "\u{1F525} ACTIVATE ALL SELECTED [Q]"
+activateBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+activateBtn.TextSize = 13
+activateBtn.Font = Enum.Font.GothamBold
+activateBtn.Parent = controlsFrame
+createCorner(activateBtn, 8)
+
+activateBtn.MouseEnter:Connect(function()
+    tween(activateBtn, {BackgroundColor3 = Color3.fromRGB(56, 224, 133)}, 0.15)
+end)
+activateBtn.MouseLeave:Connect(function()
+    tween(activateBtn, {BackgroundColor3 = CONFIG.Theme.Success}, 0.15)
+end)
+
+-- Keybind hint
+local hintLabel = Instance.new("TextLabel")
+hintLabel.Name = "Hint"
+hintLabel.Size = UDim2.new(1, 0, 0, 16)
+hintLabel.Position = UDim2.new(0, 0, 1, -20)
+hintLabel.BackgroundTransparency = 1
+hintLabel.Text = "Press RightShift to toggle | Q to activate"
+hintLabel.TextColor3 = CONFIG.Theme.TextSecondary
+hintLabel.TextSize = 10
+hintLabel.Font = Enum.Font.Gotham
+hintLabel.TextXAlignment = Enum.TextXAlignment.Center
+hintLabel.Parent = controlsFrame
+
+-- =============================================================================
+-- DRAG FUNCTIONALITY
+-- =============================================================================
+
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local startPos = nil
+
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+titleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- =============================================================================
+-- NOTIFICATION SYSTEM
+-- =============================================================================
+
+local notifFrame = Instance.new("Frame")
+notifFrame.Name = "Notifications"
+notifFrame.Size = UDim2.new(0, 260, 0, 100)
+notifFrame.Position = UDim2.new(0, 20, 0.85, 0)
+notifFrame.BackgroundTransparency = 1
+notifFrame.Parent = screenGui
+
+local notifLayout = Instance.new("UIListLayout")
+notifLayout.SortOrder = Enum.SortOrder.LayoutOrder
+notifLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+notifLayout.Padding = UDim.new(0, 6)
+notifLayout.Parent = notifFrame
+
+local function showNotification(text, color)
+    local notif = Instance.new("Frame")
+    notif.Name = "Notification"
+    notif.Size = UDim2.new(1, 0, 0, 36)
+    notif.BackgroundColor3 = color or CONFIG.Theme.Accent
+    notif.BorderSizePixel = 0
+    notif.BackgroundTransparency = 0.1
+    notif.Parent = notifFrame
+    createCorner(notif, 6)
+    
+    local notifText = Instance.new("TextLabel")
+    notifText.Size = UDim2.new(1, -12, 1, 0)
+    notifText.Position = UDim2.new(0, 10, 0, 0)
+    notifText.BackgroundTransparency = 1
+    notifText.Text = text
+    notifText.TextColor3 = CONFIG.Theme.TextPrimary
+    notifText.TextSize = 12
+    notifText.Font = Enum.Font.GothamSemibold
+    notifText.TextXAlignment = Enum.TextXAlignment.Left
+    notifText.Parent = notif
+    
+    notif.BackgroundTransparency = 1
+    notifText.TextTransparency = 1
+    
+    tween(notif, {BackgroundTransparency = 0.1}, 0.2)
+    tween(notifText, {TextTransparency = 0}, 0.2)
+    
+    task.delay(2.5, function()
+        tween(notif, {BackgroundTransparency = 1}, 0.3)
+        tween(notifText, {TextTransparency = 1}, 0.3)
+        task.wait(0.3)
+        notif:Destroy()
+    end)
+end
+
+-- =============================================================================
+-- TOOL MANAGEMENT
+-- =============================================================================
+
+local function updateCount()
+    local count = 0
+    for _ in pairs(selectedTools) do count += 1 end
+    countLabel.Text = count .. " selected"
+    if count > 0 then
+        countLabel.TextColor3 = CONFIG.Theme.Accent
+    else
+        countLabel.TextColor3 = CONFIG.Theme.TextSecondary
+    end
+end
+
+local function createToolButton(tool)
+    if toolButtons[tool] then return end
+    
+    local btn = Instance.new("TextButton")
+    btn.Name = "Tool_" .. tool.Name
+    btn.Size = UDim2.new(1, 0, 0, 38)
+    btn.BackgroundColor3 = CONFIG.Theme.Button
+    btn.BorderSizePixel = 0
+    btn.Text = ""
+    btn.AutoButtonColor = false
+    btn.LayoutOrder = #toolButtons
+    btn.Parent = scrollFrame
+    createCorner(btn, 6)
+    
+    local checkbox = Instance.new("Frame")
+    checkbox.Name = "Checkbox"
+    checkbox.Size = UDim2.new(0, 20, 0, 20)
+    checkbox.Position = UDim2.new(0, 10, 0.5, -10)
+    checkbox.BackgroundColor3 = CONFIG.Theme.CheckboxBg
+    checkbox.BorderSizePixel = 0
+    checkbox.Parent = btn
+    createCorner(checkbox, 4)
+    
+    local checkmark = Instance.new("TextLabel")
+    checkmark.Name = "Checkmark"
+    checkmark.Size = UDim2.new(1, 0, 1, 0)
+    checkmark.BackgroundTransparency = 1
+    checkmark.Text = "\u{2713}"
+    checkmark.TextColor3 = CONFIG.Theme.TextPrimary
+    checkmark.TextSize = 14
+    checkmark.Font = Enum.Font.GothamBold
+    checkmark.Visible = false
+    checkmark.Parent = checkbox
+    
+    local icon = Instance.new("TextLabel")
+    icon.Name = "Icon"
+    icon.Size = UDim2.new(0, 28, 0, 28)
+    icon.Position = UDim2.new(0, 38, 0.5, -14)
+    icon.BackgroundTransparency = 1
+    icon.TextSize = 18
+    icon.Parent = btn
+    
+    local toolLower = tool.Name:lower()
+    if toolLower:find("sword") or toolLower:find("blade") or toolLower:find("melee") then
+        icon.Text = "\u{2694}"
+    elseif toolLower:find("gun") or toolLower:find("pistol") or toolLower:find("rifle") or toolLower:find("bow") then
+        icon.Text = "\u{1F52B}"
+    elseif toolLower:find("bomb") or toolLower:find("explosive") or toolLower:find("grenade") then
+        icon.Text = "\u{1F4A3}"
+    elseif toolLower:find("potion") or toolLower:find("heal") or toolLower:find("food") then
+        icon.Text = "\u{1F9EA}"
+    elseif toolLower:find("shield") or toolLower:find("armor") then
+        icon.Text = "\u{1F6E1}"
+    elseif toolLower:find("wand") or toolLower:find("staff") or toolLower:find("magic") or toolLower:find("spell") then
+        icon.Text = "\u{1FA84}"
+    elseif toolLower:find("pick") or toolLower:find("axe") or toolLower:find("hammer") then
+        icon.Text = "\u{26CF}"
+    else
+        icon.Text = "\u{1F392}"
+    end
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "ToolName"
+    nameLabel.Size = UDim2.new(1, -110, 1, 0)
+    nameLabel.Position = UDim2.new(0, 70, 0, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = tool.Name
+    nameLabel.TextColor3 = CONFIG.Theme.TextPrimary
+    nameLabel.TextSize = 13
+    nameLabel.Font = Enum.Font.GothamSemibold
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    nameLabel.Parent = btn
+    
+    local equippedLabel = Instance.new("TextLabel")
+    equippedLabel.Name = "EquippedLabel"
+    equippedLabel.Size = UDim2.new(0, 50, 0, 18)
+    equippedLabel.Position = UDim2.new(1, -60, 0.5, -9)
+    equippedLabel.BackgroundColor3 = CONFIG.Theme.Success
+    equippedLabel.BorderSizePixel = 0
+    equippedLabel.Text = "ON"
+    equippedLabel.TextColor3 = CONFIG.Theme.TextPrimary
+    equippedLabel.TextSize = 10
+    equippedLabel.Font = Enum.Font.GothamBold
+    equippedLabel.Visible = false
+    equippedLabel.Parent = btn
+    createCorner(equippedLabel, 4)
+    
+    local function toggleSelection()
+        playButtonFeedback(btn)
+        
+        if selectedTools[tool] then
+            selectedTools[tool] = nil
+            checkbox.BackgroundColor3 = CONFIG.Theme.CheckboxBg
+            checkmark.Visible = false
+            btn.BackgroundColor3 = CONFIG.Theme.Button
+            equippedLabel.Visible = false
+        else
+            selectedTools[tool] = true
+            checkbox.BackgroundColor3 = CONFIG.Theme.CheckboxCheck
+            checkmark.Visible = true
+            btn.BackgroundColor3 = Color3.fromRGB(55, 60, 90)
+            equippedLabel.Visible = true
+        end
+        
+        updateCount()
+    end
+    
+    btn.MouseButton1Click:Connect(toggleSelection)
+    
+    btn.MouseEnter:Connect(function()
+        if not selectedTools[tool] then
+            tween(btn, {BackgroundColor3 = CONFIG.Theme.ButtonHover}, 0.1)
+        end
+    end)
+    
+    btn.MouseLeave:Connect(function()
+        if not selectedTools[tool] then
+            tween(btn, {BackgroundColor3 = CONFIG.Theme.Button}, 0.1)
+        end
+    end)
+    
+    toolButtons[tool] = {
+        button = btn,
+        checkbox = checkbox,
+        checkmark = checkmark,
+        equippedLabel = equippedLabel,
+        toggle = toggleSelection
+    }
+    
+    emptyLabel.Visible = false
+end
+
+local function removeToolButton(tool)
+    if toolButtons[tool] then
+        toolButtons[tool].button:Destroy()
+        selectedTools[tool] = nil
+        toolButtons[tool] = nil
+        updateCount()
+    end
+    
+    if next(toolButtons) == nil then
+        emptyLabel.Visible = true
+    end
+end
+
+local function scanTools()
+    for tool, data in pairs(toolButtons) do
+        removeToolButton(tool)
+    end
+    
+    for _, child in ipairs(backpack:GetChildren()) do
+        if child:IsA("Tool") then
+            createToolButton(child)
+        end
+    end
+    
+    local char = player.Character
+    if char then
+        for _, child in ipairs(char:GetChildren()) do
+            if child:IsA("Tool") then
+                createToolButton(child)
+            end
+        end
+    end
+end
+
+-- =============================================================================
+-- ACTIVATION LOGIC
+-- =============================================================================
+
+local function activateAllSelected()
+    if isProcessing then
+        showNotification("Already processing!", CONFIG.Theme.Warning)
+        return
+    end
+    
+    local toolsToActivate = {}
+    for tool, _ in pairs(selectedTools) do
+        table.insert(toolsToActivate, tool)
+    end
+    
+    if #toolsToActivate == 0 then
+        showNotification("No tools selected!", CONFIG.Theme.Warning)
+        return
+    end
+    
+    isProcessing = true
+    showNotification("Activating " .. #toolsToActivate .. " tools...", CONFIG.Theme.Accent)
+    
+    local originalTool = nil
+    local char = player.Character
+    if char then
+        for _, child in ipairs(char:GetChildren()) do
+            if child:IsA("Tool") then
+                originalTool = child
+                break
+            end
+        end
+    end
+    
+    task.spawn(function()
+        for i, tool in ipairs(toolsToActivate) do
+            if tool and tool.Parent then
+                pcall(function()
+                    local btnData = toolButtons[tool]
+                    if btnData then
+                        tween(btnData.button, {BackgroundColor3 = CONFIG.Theme.Success}, 0.05)
+                    end
+                    
+                    humanoid:EquipTool(tool)
+                    task.wait(0.03)
+                    if tool.Enabled then
+                        tool:Activate()
+                    end
+                    
+                    if btnData then
+                        task.delay(0.15, function()
+                            if selectedTools[tool] then
+                                tween(btnData.button, {BackgroundColor3 = Color3.fromRGB(55, 60, 90)}, 0.1)
+                            else
+                                tween(btnData.button, {BackgroundColor3 = CONFIG.Theme.Button}, 0.1)
+                            end
+                        end)
+                    end
+                    
+                    task.wait(CONFIG.ActivationDelay)
+                end)
+            end
+        end
+        
+        if originalTool and originalTool.Parent then
+            pcall(function()
+                task.wait(0.05)
+                humanoid:EquipTool(originalTool)
+            end)
+        end
+        
+        isProcessing = false
+        showNotification("All tools activated!", CONFIG.Theme.Success)
+    end)
+end
+
+-- =============================================================================
+-- BUTTON HANDLERS
+-- =============================================================================
+
+selectAllBtn.MouseButton1Click:Connect(function()
+    playButtonFeedback(selectAllBtn)
+    for tool, data in pairs(toolButtons) do
+        if not selectedTools[tool] then
+            data.toggle()
+        end
+    end
+    showNotification("All tools selected!", CONFIG.Theme.Accent)
+end)
+
+deselectAllBtn.MouseButton1Click:Connect(function()
+    playButtonFeedback(deselectAllBtn)
+    local toDeselect = {}
+    for tool, _ in pairs(selectedTools) do
+        table.insert(toDeselect, tool)
+    end
+    for _, tool in ipairs(toDeselect) do
+        local data = toolButtons[tool]
+        if data then
+            data.toggle()
+        end
+    end
+    showNotification("Selection cleared!", CONFIG.Theme.Danger)
+end)
+
+invertBtn.MouseButton1Click:Connect(function()
+    playButtonFeedback(invertBtn)
+    for tool, data in pairs(toolButtons) do
+        data.toggle()
+    end
+    showNotification("Selection inverted!", CONFIG.Theme.Warning)
+end)
+
+activateBtn.MouseButton1Click:Connect(function()
+    playButtonFeedback(activateBtn)
+    activateAllSelected()
+end)
+
+toggleBtn.MouseButton1Click:Connect(function()
+    playButtonFeedback(toggleBtn)
+    isGUIVisible = not isGUIVisible
+    
+    if isGUIVisible then
+        mainFrame.Visible = true
+        tween(mainFrame, {Size = UDim2.new(0, 340, 0, 450)}, 0.2)
+        toggleBtn.Text = "\u{2212}"
+    else
+        tween(mainFrame, {Size = UDim2.new(0, 340, 0, 40)}, 0.2)
+        task.wait(0.2)
+        mainFrame.Visible = false
+    end
+end)
+
+-- =============================================================================
+-- KEYBINDS
+-- =============================================================================
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == CONFIG.ToggleKey then
+        isGUIVisible = not isGUIVisible
+        screenGui.Enabled = isGUIVisible
+        
+    elseif input.KeyCode == CONFIG.ActivateKey then
+        activateAllSelected()
+    end
+end)
+
+-- =============================================================================
+-- TOOL DETECTION
+-- =============================================================================
+
+backpack.ChildAdded:Connect(function(child)
+    if child:IsA("Tool") then
+        task.wait(0.1)
+        createToolButton(child)
+        showNotification("Tool added: " .. child.Name, CONFIG.Theme.Accent)
+    end
+end)
+
+backpack.ChildRemoved:Connect(function(child)
+    if child:IsA("Tool") then
+        task.wait(0.1)
+        local char = player.Character
+        if not (char and char:FindFirstChild(child.Name)) then
+            removeToolButton(child)
+        end
+    end
+end)
+
+local function setupCharacter(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    
+    char.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then
+            task.wait(0.1)
+            createToolButton(child)
+        end
+    end)
+    
+    char.ChildRemoved:Connect(function(child)
+        if child:IsA("Tool") then
+            task.wait(0.1)
+            if not backpack:FindFirstChild(child.Name) then
+                removeToolButton(child)
+            end
+        end
+    end)
+    
+    scanTools()
+end
+
+if player.Character then
+    setupCharacter(player.Character)
+end
+player.CharacterAdded:Connect(setupCharacter)
+
+-- =============================================================================
+-- INITIALIZATION
+-- =============================================================================
+
+scanTools()
+showNotification("Multi-Tool Selector loaded! Press RightShift", CONFIG.Theme.Success)
+
+print("[Multi-Tool Selector] Loaded successfully!")
+print("[Multi-Tool Selector] Controls:")
+print("  - RightShift: Toggle GUI")
+print("  - Q: Activate all selected tools")
+print("  - Click tools in GUI to select/deselect")
